@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -26,10 +27,16 @@ type apiHandler struct {
 }
 
 const (
-	MessageKindMessageCreated = "message_created"
+	MessageKindMessageCreated  = "message_created"
+	MessageKindMessageReceived = "message_received"
 )
 
 type MessageMessageCreated struct {
+	ID      string `json:"id"`
+	Message string `json:"message"`
+}
+
+type MessageMessageReceived struct {
 	ID      string `json:"id"`
 	Message string `json:"message"`
 }
@@ -203,6 +210,25 @@ func (h apiHandler) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 	slog.Info("new client connected", "room_id", rawRoomID, "client_ip", r.RemoteAddr)
 	h.subscribers[rawRoomID][c] = cancel
 	h.mu.Unlock()
+
+	go func() {
+		defer cancel()
+		for {
+			_, p, err := c.ReadMessage()
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			h.notifyClients(Message{
+				Kind:   MessageKindMessageReceived,
+				RoomID: rawRoomID,
+				Value: MessageMessageReceived{
+					ID:      uuid.NewString(),
+					Message: string(p),
+				},
+			})
+		}
+	}()
 
 	<-ctx.Done()
 
